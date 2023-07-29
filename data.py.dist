@@ -1,0 +1,38 @@
+class DBOptions:
+    """
+    Database connection options class
+    """
+
+    def __init__(self, user: str, password: str, host: str, database: str):
+        self.user = user
+        self.password = password
+        self.host = host
+        self.database = database
+
+
+# Database connection options definitions
+db_options = DBOptions(
+                        user='[your username]', 
+                        password='[your password]', 
+                        host='[your host]', 
+                        database='[your database name]'
+                        )
+
+
+class APIKeys:
+    """
+    API connection details class
+    """
+
+    def __init__(self, telegram_key: str, telegram_name: str, openai_key: str):
+        self.telegram_key = telegram_key
+        self.telegram_name = telegram_name
+        self.openai_key = openai_key
+
+
+# API keys
+api_options = APIKeys(
+                        telegram_key='[your key]',
+                        telegram_name='[your key]', 
+                        openai_key='[your key]'
+                        )
