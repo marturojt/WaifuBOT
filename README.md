@@ -219,6 +219,8 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ## Contact
 
 Arturo Jiménez - [@_systemctl](https://twitter.com/_systemctl) - okami@freejolitos.com
+Luis Luna - []()
+Diego Rodríguez - []()
 
 WaifuBOT: [https://github.com/marturojt/WaifuBOT](https://github.com/marturojt/WaifuBOT)
 
