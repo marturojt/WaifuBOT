@@ -1,31 +1,30 @@
+# Import general libraries
 import logging
 import openai
 
+# Bot and database partial imports
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram_dialog import Window, Dialog
 from aiogram_dialog.widgets.kbd import Button
 from aiogram_dialog.widgets.text import Const, Format
-from sqlalchemy import create_engine, Table, Column, Integer, String, Text, select, desc
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.orm import mapped_column
-from sqlalchemy_utils import database_exists, create_database
 
-from keep_alive import keep_alive
+# simple server for monitoring (maybe with uptime robot)
+from helpers import keep_alive
+
+# Keys
 from data import api_options, db_options
 
+# Link to database functions
+
+
+# Logging configuration
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database connection
-connection_string = f"mysql+mysqlconnector://{db_options.user}:{db_options.password}@{db_options.host}/{db_options.database}"
-engine = create_engine(connection_string)
-
+# Bot and OpenAI connection
 bot = Bot(token=api_options.telegram_key)
 dp = Dispatcher(bot)
 openai.api_key = api_options.openai_key
-
-
 
 keep_alive()
 
