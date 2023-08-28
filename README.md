@@ -127,7 +127,7 @@ Once you have the telegram bot key and openai key, you need to copy tje data.py.
    ```
 2. Install NPM packages
    ```sh
-   pip install logging openai aiogram aiogram-dialog sqlalchemy
+   pip install logging openai aiogram aiogram-dialog sqlalchemy sqlalchemy-utils flask myslq-connector-python
    ```
 3. Cop `data.py.dist` to `data.py` and enter your api keys and the database credentials
    ```python
@@ -174,13 +174,16 @@ Once you have the telegram bot key and openai key, you need to copy tje data.py.
 
 - [x] Create a basic bot
 - [x] Set conversation history
-- [ ] Set custom name for the girlfriend
-- [ ] Add different personalities
+- [x] Set custom name for the girlfriend
+- [x] Add different personalities
 - [ ] Add the capability to send photos
 - [ ] Add the capability to send audios
 - [ ] Multi-language Support
     - [ ] English
     - [x] Spanish
+- [ ] Add more personalities
+- [ ] Make it more adult related
+
 
 See the [open issues](https://github.com/marturojt/WaifuBOT/issues) for a full list of proposed features (and known issues).
 
