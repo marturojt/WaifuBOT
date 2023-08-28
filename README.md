@@ -127,7 +127,7 @@ Once you have the telegram bot key and openai key, you need to copy tje data.py.
    ```
 2. Install NPM packages
    ```sh
-   pip install logging openai aiogram aiogram-dialog sqlalchemy sqlalchemy-utils flask myslq-connector-python
+   pip install logging openai aiogram aiogram-dialog sqlalchemy sqlalchemy-utils flask mysql-connector-python
    ```
 3. Cop `data.py.dist` to `data.py` and enter your api keys and the database credentials
    ```python
