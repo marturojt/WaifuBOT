@@ -3,9 +3,6 @@ from models.waifu_models import Users, ChatLog, WaifuRoles
 
 db_session = db_session()
 
-users = db_session.query(Users).all()
-print(users)
-
 # USER OPERATIONS
 
 # Search for a user in the database

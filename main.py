@@ -13,7 +13,7 @@ from aiogram.utils import executor
 
 # Import functions from helpers package
 from helpers import keep_alive, search_user, new_user, update_user, update_user_waifu_name, update_user_waifu_role, get_waifu_role_by_id, get_waifu_role_descriptions, get_waifu_role_descriptions_with_id, chat_openai_waifu
-from data import api_options, db_options
+from data import api_options
 
 # Logging configuration
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
