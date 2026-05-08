@@ -1,275 +1,414 @@
-# Import general libraries
+import asyncio
 import logging
-import openai
 
-import aiogram.utils.markdown as md
-from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters import Text
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.types import ParseMode
-from aiogram.utils import executor
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils.chat_action import ChatActionSender
 
-# Import functions from helpers package
-from helpers import keep_alive, search_user, new_user, update_user, update_user_waifu_name, update_user_waifu_role, get_waifu_role_by_id, get_waifu_role_descriptions, get_waifu_role_descriptions_with_id, chat_openai_waifu
-from data import api_options
+from helpers import (
+    keep_alive,
+    search_user, new_user, update_user,
+    update_user_waifu_name, update_user_waifu_role,
+    get_waifu_role_descriptions, get_waifu_role_descriptions_with_id,
+    chat_openai_waifu,
+    delete_chat_log_user, delete_memory_summaries,
+    is_rate_limited,
+    update_user_last_active, toggle_user_voice, update_user_voice_style,
+    update_user_appearance, toggle_user_proactive,
+    transcribe_voice, generate_voice, VALID_VOICE_STYLES,
+    generate_selfie,
+    start_scheduler,
+)
+from config import TELEGRAM_TOKEN, KEEP_ALIVE
 
-# Logging configuration
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot and OpenAI connection
-bot = Bot(token=api_options.telegram_key)
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
-# openai.api_key = api_options.openai_key
-
-keep_alive()
+bot = Bot(token=TELEGRAM_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
 
 
-# States
 class Form(StatesGroup):
     get_user_name = State()
     get_girlfriend_name = State()
     get_girlfriend_model = State()
+    get_appearance = State()
+
 
 # CONFIGURATION FUNCTIONALITY
 
-# Message handler for commands /start and /help
-@dp.message_handler(commands=['start', 'help'])
-async def send_welcome(message: types.Message):
-    """ Welcome bot message and manage for /start and /help commands
-
-    Args:
-        message (types.Message): The message received from the user in the chat
-    """
+@dp.message(Command('start', 'help'))
+async def send_welcome(message: types.Message, state: FSMContext):
     await message.answer("Hola, Soy tu novia virtual y estare encantada en complacerte!")
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
 
-    user_db = search_user(message.from_user.id)
-
-    if (user_db):
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        config_btn = types.KeyboardButton("/config")
-        markup.add(config_btn)
-        await message.answer("Ya haz hecho la configuracion inicial, puedes empezar a hablar conmigo!\nSi quieres cambiar algo de la configuracion puedes usar el comando de configuración, o directamente presionar el boton de abajo.", reply_markup=markup)
-    else: 
+    if user_db:
+        markup = types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="/config")]],
+            resize_keyboard=True,
+        )
+        await message.answer(
+            "Ya haz hecho la configuracion inicial, puedes empezar a hablar conmigo!\n"
+            "Si quieres cambiar algo usa /config.",
+            reply_markup=markup,
+        )
+    else:
         await message.answer("Pero antes de empezar, necesito conocerte un poco mejor")
-        await general_configuration(message)
+        await config_user_name(message, state)
 
-# Send actual config into message
-@dp.message_handler(commands=['config_actual'])
+
+@dp.message(Command('config_actual'))
 async def actual_config(message: types.Message):
-    user_db = search_user(message.from_user.id)
-    waifu_roles = get_waifu_role_descriptions_with_id()
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    waifu_roles = await asyncio.to_thread(get_waifu_role_descriptions_with_id)
 
-    if (user_db):
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        user_name_btn = types.KeyboardButton("/my_name")
-        waifu_name_btn = types.KeyboardButton("/waifu_name")
-        waifu_role_btn = types.KeyboardButton("/waifu_role")
-        cancel_handler_btn = types.KeyboardButton("/finalizar")
-        markup.add(user_name_btn, waifu_name_btn, waifu_role_btn)
-        markup.add(cancel_handler_btn)
-    
+    if user_db:
+        markup = types.ReplyKeyboardMarkup(
+            keyboard=[
+                [types.KeyboardButton(text="/my_name"), types.KeyboardButton(text="/waifu_name"), types.KeyboardButton(text="/waifu_role")],
+                [types.KeyboardButton(text="/finalizar")],
+            ],
+            resize_keyboard=True,
+        )
+        role_desc = waifu_roles[user_db.selected_waifu_role - 1][0] if user_db.selected_waifu_role else "Sin configurar"
+        voice_status = f"{'✅' if user_db.voice_enabled else '❌'} ({user_db.voice_style or 'nova'})"
+        proactive_status = "✅" if user_db.proactive_enabled else "❌"
+        await message.answer(
+            f"Tu configuracion actual es:\n"
+            f"Tu nombre: <b>{user_db.name}</b>\n"
+            f"Mi nombre: <b>{user_db.waifu_name}</b>\n"
+            f"Rol: <b>{role_desc}</b>\n"
+            f"Voz: {voice_status}\n"
+            f"Mensajes proactivos: {proactive_status}\n\n"
+            f"Comandos: /voice · /selfie · /notifications · /reset",
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
 
-        
-        await bot.send_message(
-        message.chat.id,
-        md.text(
-            md.text('Tu configuracion actual es:'),
-            md.text('Tu nombre:', md.bold(user_db.name)),
-            md.text('Mi nombre (waifu):', md.bold(user_db.waifu_name)),
-            md.text('Rol de novia:', md.bold(waifu_roles[user_db.selected_waifu_role - 1][0])),
-            md.text('Si deseas cambiar algo, puedes usar los siguientes comandos:'),
-            sep='\n',
-        ),
-        reply_markup=markup,
-        parse_mode=ParseMode.MARKDOWN,
-    )
 
-# Message handler for command /config
-@dp.message_handler(commands=['config'])
-async def general_configuration(message: types.Message):
-    """ General configuration for the bot
-
-    Args:
-        message (types.Message): The message received from the user in the chat
-    """
+@dp.message(Command('config'))
+async def general_configuration(message: types.Message, state: FSMContext):
     markup = types.ReplyKeyboardRemove()
     await message.answer("Vamos a revisar tu configuracion", reply_markup=markup)
-    user_db = search_user(message.from_user.id)
-    waifu_roles = get_waifu_role_descriptions_with_id()
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
 
-    if (user_db):
+    if user_db:
         await actual_config(message)
-    else:    
-        await config_user_name(message)
+    else:
+        await config_user_name(message, state)
 
-# Message handler for command /cancel (to cancel any State)
-@dp.message_handler(state='*', commands=['cancel', 'finalizar'])
-@dp.message_handler(Text(equals='cancel', ignore_case=True), state='*')
+
+@dp.message(StateFilter('*'), Command('cancel', 'finalizar'))
+@dp.message(StateFilter('*'), F.text.casefold() == 'cancel')
 async def cancel_handler(message: types.Message, state: FSMContext):
-    """Allow user to cancel action via /cancel command
-
-    Args:
-        message (types.Message): The message received from the user in the chat
-        state: The state of the user
-    """
     current_state = await state.get_state()
-
     if current_state is None:
-        # User is not in any state, ignoring
         markup = types.ReplyKeyboardRemove()
         await message.answer('Podemos platicar si gustas', reply_markup=markup)
         return
-
-    # Cancel state and inform user about it
-    await state.finish()
+    await state.clear()
     await message.reply('Accion cancelada')
 
-# Message handler for command /my_name
-@dp.message_handler(commands=['my_name'])
-async def config_user_name(message: types.Message):
-    """ Ask the user for his name and save it or update it in the database
 
-    Args:
-        message (types.Message): The message received from the user in the chat
-    """
-    if (search_user(message.from_user.id)):
-        await message.answer("Ya nos conocemos, pero si gustas puedo llamarte de otra forma \nComo quieres que te llame ahora:")
+@dp.message(Command('my_name'))
+async def config_user_name(message: types.Message, state: FSMContext):
+    if await asyncio.to_thread(search_user, message.from_user.id):
+        await message.answer("Ya nos conocemos, pero si gustas puedo llamarte de otra forma.\n¿Cómo quieres que te llame ahora?")
     else:
         await message.answer("Primero quiero conocerte, dime tu nombre por favor:")
-    await Form.get_user_name.set()
+    await state.set_state(Form.get_user_name)
 
-# Set user name after /my_name command is executed
-@dp.message_handler(state=Form.get_user_name)
+
+@dp.message(Form.get_user_name)
 async def process_name(message: types.Message, state: FSMContext):
-    """Save user name and finish the state
-
-    Args:
-        message (types.Message): The message received from the user in the chat
-        state (FSMContext): The state of the user
-    """    
     user_name = message.text
-    user_db = search_user(message.from_user.id)
-    if (user_db):
-        update_user(message.from_user.id, user_name)
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    if user_db:
+        await asyncio.to_thread(update_user, message.from_user.id, user_name)
     else:
-        new_user(message.from_user.id, user_name)
-    
-    await state.finish()
+        await asyncio.to_thread(new_user, message.from_user.id, user_name)
+
+    await state.clear()
     await message.reply(f"Genial, ahora te llamaré {user_name}")
 
-    # Set waifu name if it's not set
-    if (user_db is None):
-        await config_waifu_name(message)
+    if user_db is None:
+        await config_waifu_name(message, state)
     else:
         await actual_config(message)
 
-# Message handler for command /waifu_name
-@dp.message_handler(commands=['waifu_name'])
-async def config_waifu_name(message: types.Message):
-    """ Ask the user for his waifu name and save it or update it in the database
 
-    Args:
-        message (types.Message): The message received from the user in the chat
-    """
-    user_db = search_user(message.from_user.id)
-    if (user_db is None):
+@dp.message(Command('waifu_name'))
+async def config_waifu_name(message: types.Message, state: FSMContext):
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    if user_db is None:
         await message.answer("Primero tengo que saber como te llamas")
-        await config_user_name(message)
+        await config_user_name(message, state)
     else:
         await message.answer("Dime como quieres que me llame:")
-    await Form.get_girlfriend_name.set()
+    await state.set_state(Form.get_girlfriend_name)
 
-# Set waifu name after /waifu_name command is executed
-@dp.message_handler(state=Form.get_girlfriend_name)
+
+@dp.message(Form.get_girlfriend_name)
 async def process_waifu_name(message: types.Message, state: FSMContext):
-    """Save waifu name and finish the state
-
-    Args:
-        message (types.Message): The message received from the user in the chat
-        state (FSMContext): The state of the user
-    """    
     waifu_name = message.text
-    if (search_user(message.from_user.id)):
-        update_user_waifu_name(message.from_user.id, waifu_name)
+    if await asyncio.to_thread(search_user, message.from_user.id):
+        await asyncio.to_thread(update_user_waifu_name, message.from_user.id, waifu_name)
     else:
-        new_user(message.from_user.id, waifu_name)
-    
-    await state.finish()
+        await asyncio.to_thread(new_user, message.from_user.id, waifu_name)
+
+    await state.clear()
     await message.reply(f"Genial, ahora me llamaré {waifu_name}")
 
-    user_db = search_user(message.from_user.id)
-    if (user_db.selected_waifu_role is None):
-        await config_waifu_role(message)
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    if user_db.selected_waifu_role is None:
+        await config_waifu_role(message, state)
     else:
         await actual_config(message)
 
-# Message handler for waifu role configuration
-@dp.message_handler(commands=['waifu_role'])
-async def config_waifu_role(message: types.Message):
-    """ Ask the user for his waifu role and save it or update it in the database
 
-    Args:
-        message (types.Message): The message received from the user in the chat
-    """
-    available_roles = get_waifu_role_descriptions()
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
-    markup.add(*available_roles)
-    await message.answer("Que rol quieres que tenga?", reply_markup=markup)
-    await Form.get_girlfriend_model.set()
+@dp.message(Command('waifu_role'))
+async def config_waifu_role(message: types.Message, state: FSMContext):
+    available_roles = await asyncio.to_thread(get_waifu_role_descriptions)
+    keyboard = [[types.KeyboardButton(text=role)] for role in available_roles]
+    markup = types.ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, selective=True)
+    await message.answer("¿Qué rol quieres que tenga?", reply_markup=markup)
+    await state.set_state(Form.get_girlfriend_model)
 
-# Set waifu role after /waifu_role command is executed
-@dp.message_handler(lambda message: message.text not in get_waifu_role_descriptions(), state=Form.get_girlfriend_model)
-async def process_waifu_role_invalid(message: types.Message):
-    return await message.reply("Rol invalido. Elige un rol de la lista.")
-@dp.message_handler(state=Form.get_girlfriend_model)
+
+@dp.message(Form.get_girlfriend_model)
 async def process_waifu_role(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['waifu_role'] = message.text
+    available_roles = await asyncio.to_thread(get_waifu_role_descriptions)
+    if message.text not in available_roles:
+        return await message.reply("Rol invalido. Elige un rol de la lista.")
 
-    # Remove keyboard
-    markup = types.ReplyKeyboardRemove()
-
-    waifu_roles_with_id = get_waifu_role_descriptions_with_id()
-    for waifu_roles_description in waifu_roles_with_id:
-        # print(waifu_roles_description)
-        if waifu_roles_description[0] == message.text:
-            update_user_waifu_role(message.from_user.id, waifu_roles_description[1])
+    waifu_roles_with_id = await asyncio.to_thread(get_waifu_role_descriptions_with_id)
+    for description, role_id in waifu_roles_with_id:
+        if description == message.text:
+            await asyncio.to_thread(update_user_waifu_role, message.from_user.id, role_id)
             break
-    await state.finish()
-    
-    # print actual config
+
+    markup = types.ReplyKeyboardRemove()
+    await message.answer("Rol actualizado!", reply_markup=markup)
+    await state.clear()
     await actual_config(message)
 
 
+@dp.message(Command('reset'))
+async def reset_conversation(message: types.Message):
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    if not user_db:
+        await message.answer("Aún no tenemos conversaciones guardadas 😊")
+        return
+    await asyncio.to_thread(delete_chat_log_user, message.from_user.id)
+    await asyncio.to_thread(delete_memory_summaries, message.from_user.id)
+    await message.answer("Listo, borré todos nuestros recuerdos 🥺 Empecemos de cero...")
+
+
+# VOICE COMMANDS
+
+@dp.message(Command('voice'))
+async def toggle_voice(message: types.Message):
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    if not user_db:
+        await message.answer("Primero necesito conocerte. Usa /start")
+        return
+
+    new_state = not (user_db.voice_enabled or False)
+    await asyncio.to_thread(toggle_user_voice, message.from_user.id, new_state)
+
+    if new_state:
+        styles_list = " · ".join(VALID_VOICE_STYLES)
+        await message.answer(
+            f"🔊 Respuestas de voz activadas con estilo <b>{user_db.voice_style or 'nova'}</b>.\n"
+            f"Estilos disponibles: {styles_list}\n"
+            f"Cambia el estilo con: <code>/voice_style nova</code>",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer("🔇 Respuestas de voz desactivadas.")
+
+
+@dp.message(Command('voice_style'))
+async def set_voice_style(message: types.Message):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2 or parts[1].strip() not in VALID_VOICE_STYLES:
+        await message.answer(f"Estilos válidos: {' · '.join(VALID_VOICE_STYLES)}")
+        return
+    style = parts[1].strip()
+    await asyncio.to_thread(update_user_voice_style, message.from_user.id, style)
+    await message.answer(f"Voz cambiada a <b>{style}</b> 🎙️", parse_mode="HTML")
+
+
+# VOICE MESSAGE HANDLER
+
+@dp.message(F.voice)
+async def handle_voice_message(message: types.Message, state: FSMContext):
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    if user_db is None or user_db.name is None or user_db.waifu_name is None or user_db.selected_waifu_role is None:
+        await general_configuration(message, state)
+        return
+
+    if is_rate_limited(message.from_user.id):
+        await message.answer("Dame un respiro, estoy un poco abrumada 💕")
+        return
+
+    try:
+        async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
+            voice_bytes = await bot.download(message.voice)
+            transcribed = await transcribe_voice(voice_bytes)
+
+        await message.answer(f"🎤 _{transcribed}_", parse_mode="Markdown")
+
+        async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
+            response_txt = await chat_openai_waifu(
+                transcribed, user_db.name, user_db.waifu_name,
+                user_db.selected_waifu_role, message.from_user.id,
+            )
+
+        if user_db.voice_enabled:
+            audio_bytes = await generate_voice(response_txt, user_db.voice_style or 'nova')
+            await message.answer_voice(types.BufferedInputFile(audio_bytes, "response.ogg"))
+        else:
+            await message.answer(response_txt)
+
+        await asyncio.to_thread(update_user_last_active, message.from_user.id)
+
+    except Exception as e:
+        logger.error("Error in voice handler for user %s: %s", message.from_user.id, e)
+        await message.answer("Tuve problemas con el audio, intenta de nuevo 🥺")
+
+
+# SELFIE COMMANDS
+
+@dp.message(Command('selfie'))
+async def send_selfie(message: types.Message):
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    if not user_db or not user_db.waifu_name or not user_db.selected_waifu_role:
+        await message.answer("Primero completa la configuración con /start")
+        return
+
+    waifu_roles = await asyncio.to_thread(get_waifu_role_descriptions_with_id)
+    role_desc = next(
+        (desc for desc, rid in waifu_roles if rid == user_db.selected_waifu_role),
+        ""
+    )
+
+    await message.answer("Un momento, me estoy arreglando para la foto... 📸")
+    try:
+        async with ChatActionSender.upload_photo(bot=bot, chat_id=message.chat.id):
+            image_url = await generate_selfie(
+                user_db.waifu_name,
+                role_desc,
+                user_db.appearance_description,
+            )
+        await message.answer_photo(image_url, caption=f"¿Te gusta? 😊")
+    except Exception as e:
+        logger.error("Selfie generation failed for user %s: %s", message.from_user.id, e)
+        await message.answer("No pude tomar la foto ahora mismo 🥺 Intenta más tarde.")
+
+
+@dp.message(Command('appearance'))
+async def set_appearance(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Descríbeme cómo quieres que me vea en las fotos. Por ejemplo:\n"
+        "<i>'cabello largo negro, ojos verdes, estilo casual elegante'</i>",
+        parse_mode="HTML",
+    )
+    await state.set_state(Form.get_appearance)
+
+
+@dp.message(Form.get_appearance)
+async def process_appearance(message: types.Message, state: FSMContext):
+    await asyncio.to_thread(update_user_appearance, message.from_user.id, message.text)
+    await state.clear()
+    await message.answer("Guardado ✅ Usa /selfie para verme así 📸")
+
+
+# NOTIFICATIONS
+
+@dp.message(Command('notifications'))
+async def toggle_notifications(message: types.Message):
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+    if not user_db:
+        await message.answer("Primero necesito conocerte. Usa /start")
+        return
+
+    new_state = not (user_db.proactive_enabled if user_db.proactive_enabled is not None else True)
+    await asyncio.to_thread(toggle_user_proactive, message.from_user.id, new_state)
+
+    if new_state:
+        await message.answer("🔔 Te voy a escribir cuando te extrañe 💕")
+    else:
+        await message.answer("🔕 De acuerdo, no te molestaré si no me escribes primero.")
 
 
 # CHATGPT FUNCTIONALITY
 
-# Message handler for non-commands
-@dp.message_handler()
-async def gpt(message: types.Message):
-    """ Interaction whith chat gpt function
+@dp.message()
+async def gpt(message: types.Message, state: FSMContext):
+    if not message.text:
+        await message.answer("Por ahora solo puedo leer mensajes de texto 😊")
+        return
+    if len(message.text) > 2000:
+        await message.answer("Tu mensaje es muy largo, ¿puedes resumirlo un poco? 🥺")
+        return
 
-    Args:
-        message (types.Message): The message received from the user in the chat
-    """    
-    logger.info(message)
+    if is_rate_limited(message.from_user.id):
+        await message.answer("Dame un respiro, estoy un poco abrumada 💕")
+        return
 
-    # Evaluate if the user exists in the database 
-    user_db = search_user(message.from_user.id)
-    # print(user_db)
-    
-    if (user_db is None): 
-        await general_configuration(message)
-    elif(user_db.name is None or user_db.waifu_name is None or user_db.selected_waifu_role is None):
-        await general_configuration(message)
-    else:
-        response_txt = await chat_openai_waifu(message.text, user_db.name, user_db.waifu_name, user_db.selected_waifu_role, message.from_user.id)
-        await message.answer(response_txt)
+    user_db = await asyncio.to_thread(search_user, message.from_user.id)
+
+    if user_db is None or user_db.name is None or user_db.waifu_name is None or user_db.selected_waifu_role is None:
+        await general_configuration(message, state)
+        return
+
+    try:
+        async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
+            response_txt = await chat_openai_waifu(
+                message.text, user_db.name, user_db.waifu_name,
+                user_db.selected_waifu_role, message.from_user.id,
+            )
+
+        if user_db.voice_enabled:
+            audio_bytes = await generate_voice(response_txt, user_db.voice_style or 'nova')
+            await message.answer_voice(types.BufferedInputFile(audio_bytes, "response.ogg"))
+        else:
+            await message.answer(response_txt)
+
+        await asyncio.to_thread(update_user_last_active, message.from_user.id)
+
+    except Exception as e:
+        logger.error("Unhandled error in gpt handler for user %s: %s", message.from_user.id, e)
+        await message.answer("Algo salió mal, intenta de nuevo 💕")
+
+
+async def main():
+    if KEEP_ALIVE:
+        keep_alive()
+    start_scheduler(bot)
+
+    await bot.set_my_commands([
+        types.BotCommand(command="start",         description="Bienvenida e inicio"),
+        types.BotCommand(command="config_actual", description="Ver tu configuración actual"),
+        types.BotCommand(command="config",        description="Editar configuración"),
+        types.BotCommand(command="selfie",        description="📸 Genera una foto de tu waifu"),
+        types.BotCommand(command="voice",         description="🔊 Activar/desactivar respuestas de voz"),
+        types.BotCommand(command="voice_style",   description="🎙️ Cambiar estilo de voz (ej: /voice_style nova)"),
+        types.BotCommand(command="appearance",    description="🎨 Describir apariencia para las fotos"),
+        types.BotCommand(command="notifications", description="🔔 Activar/desactivar mensajes proactivos"),
+        types.BotCommand(command="reset",         description="🗑️ Borrar historial de conversación"),
+        types.BotCommand(command="my_name",       description="Cambiar tu nombre"),
+        types.BotCommand(command="waifu_name",    description="Cambiar el nombre de tu waifu"),
+        types.BotCommand(command="waifu_role",    description="Cambiar personalidad"),
+        types.BotCommand(command="finalizar",     description="Cancelar acción actual"),
+    ])
+
+    await dp.start_polling(bot, skip_updates=True)
+
 
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
