@@ -152,6 +152,7 @@ Only change `.env` — no code changes needed:
 - [ ] Premium / VIP tiers
 - [ ] Multi-language support (English)
 - [ ] Custom personality builder
+- [ ] Voice quality upgrade — `tts-1-hd` (drop-in improvement) or ElevenLabs integration (near-human quality)
 
 ---
 
